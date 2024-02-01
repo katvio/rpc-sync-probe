@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: check-block-level-scripts-configmap
+data:
+  block-level.py: |
+    import platform
+    import time
+    import requests
+    import random
+    import os
+    import logging
+    from prometheus_client import start_http_server, Gauge
+
+    # Read environment variables from Kubernetes
+    PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT"))
+    ENDPOINTS_TO_MONITOR = [
+        os.getenv("ENDPOINT_TO_MONITOR_1"),
+        os.getenv("ENDPOINT_TO_MONITOR_2"),
+        os.getenv("ENDPOINT_TO_MONITOR_3")
+    ]
+    ENDPOINT_TO_COMPARE_WITH_1 = os.getenv("ENDPOINT_TO_COMPARE_WITH_1")
+    ENDPOINT_TO_COMPARE_WITH_2 = os.getenv("ENDPOINT_TO_COMPARE_WITH_2")
+    BLOCK_DIFF_THRESHOLD = int(os.getenv("BLOCK_DIFF_THRESHOLD"))
+    SLEEP_INTERVAL = int(os.getenv("SLEEP_INTERVAL"))
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    # Prometheus metric
+    rpc_block_level_status_gauge = Gauge('rpc_block_level_status', 'Block level comparison with public RPCs', ['status', 'endpoint'])
+
+    def fetch_block_level(endpoint):
+        try:
+            response = requests.get(endpoint)
+            if response.status_code == 200:
+                data = response.json()
+                block_level = data.get("level")
+                if block_level is not None:
+                    logger.info(f"Block level fetched from {endpoint}: {block_level}")
+                    return block_level
+                else:
+                    logger.error(f"Failed to find 'level' field in JSON response from {endpoint}.")
+            else:
+                logger.error(f"HTTP Request failed with status code: {response.status_code} for {endpoint}")
+        except Exception as e:
+            logger.error(f"Error fetching block level from {endpoint}: {e}")
+        return None
+
+    def compare_block_level(my_block_level, public_rpc_block_level, endpoint_name, public_rpc_endpoint):
+        logger.info(f"Comparing block level with {public_rpc_endpoint}")
+        diff = abs(my_block_level - public_rpc_block_level)
+        logger.info(f"Block level difference between {endpoint_name} and {public_rpc_endpoint}: {diff}")
+        if diff >= BLOCK_DIFF_THRESHOLD:
+            logger.warning(f"Block level difference exceeds threshold for {endpoint_name} compared with {public_rpc_endpoint}. Threshold: {BLOCK_DIFF_THRESHOLD}")
+            return False, diff
+        else:
+            return True, diff
+
+    def main():
+        # Start Prometheus HTTP server
+        start_http_server(PROMETHEUS_PORT)  # Expose metrics
+        logger.info(f"Prometheus HTTP server started on port {PROMETHEUS_PORT}")
+
+        while True:
+            # Randomly choose one public RPC to compare with
+            public_rpc_to_compare = random.choice([ENDPOINT_TO_COMPARE_WITH_1, ENDPOINT_TO_COMPARE_WITH_2])
+            public_rpc_block_level = fetch_block_level(public_rpc_to_compare)
+
+            if public_rpc_block_level is not None:
+                for endpoint in ENDPOINTS_TO_MONITOR:
+                    logger.info(f"Checking block level for {endpoint}")
+                    my_block_level = fetch_block_level(endpoint)
+                    
+                    if my_block_level is not None:
+                        is_ok, diff = compare_block_level(my_block_level, public_rpc_block_level, endpoint, public_rpc_to_compare)
+
+                        if not is_ok and public_rpc_to_compare == ENDPOINT_TO_COMPARE_WITH_1:
+                            # Compare with the second public RPC
+                            logger.info(f"Comparing with second public RPC")
+                            other_public_rpc_block_level = fetch_block_level(ENDPOINT_TO_COMPARE_WITH_2)
+                            if other_public_rpc_block_level is not None:
+                                is_ok, diff = compare_block_level(my_block_level, other_public_rpc_block_level, endpoint, ENDPOINT_TO_COMPARE_WITH_2)
+                        elif not is_ok and public_rpc_to_compare == ENDPOINT_TO_COMPARE_WITH_2:
+                            logger.info(f"Comparing with second public RPC")
+                            other_public_rpc_block_level = fetch_block_level(ENDPOINT_TO_COMPARE_WITH_1)
+                            if other_public_rpc_block_level is not None:
+                                is_ok, diff = compare_block_level(my_block_level, other_public_rpc_block_level, endpoint, ENDPOINT_TO_COMPARE_WITH_1)
+
+                        if is_ok:
+                            rpc_block_level_status_gauge.labels(status='NOK', endpoint=endpoint).set(0)
+                        else:
+                            rpc_block_level_status_gauge.labels(status='NOK', endpoint=endpoint).set(1)
+                            break  # Break the loop if a significant difference is found
+
+                    else:
+                        logger.error(f"Failed to fetch block level from {endpoint}")
+                        rpc_block_level_status_gauge.labels(status='UNDEFINED', endpoint=endpoint).set(1)
+
+            else:
+                logger.error(f"Failed to fetch block level from the public RPC: {public_rpc_to_compare}")
+
+            logger.info(f"Sleeping for {SLEEP_INTERVAL} seconds")
+            logger.info("\n")
+            time.sleep(SLEEP_INTERVAL)  # Fetch and update the metric based on the sleep interval
+
+    if __name__ == "__main__":
+        main()

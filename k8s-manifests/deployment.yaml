@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: check-block-level-mainnet
+  namespace: check-block-level-mainnet
+  labels:
+    app: check-block-level-mainnet
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: check-block-level-mainnet
+  template:
+    metadata:
+      labels:
+        app: check-block-level-mainnet
+    spec:
+      securityContext:
+        fsGroup: 1000  # Assuming 'promexporter' user is assigned UID 1000
+        runAsNonRoot: true
+      containers:
+        - name: check-block-level
+          image: ghcr.io/katvio/baseimg-python-custom-prometheus-exporter:latest
+          command: ["python3", "/scripts/block-level.py"]
+          ports:
+          - containerPort: 8091
+          env:
+            - name: PROMETHEUS_PORT
+              value: "8091"  # Set the desired exposed port here that Prom will watch
+            - name: ENDPOINT_TO_MONITOR_1
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: ENDPOINT_TO_MONITOR_1
+            - name: ENDPOINT_TO_MONITOR_2
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: ENDPOINT_TO_MONITOR_2
+            - name: ENDPOINT_TO_MONITOR_3
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: ENDPOINT_TO_MONITOR_3
+            - name: ENDPOINT_TO_COMPARE_WITH_1
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: ENDPOINT_TO_COMPARE_WITH_1
+            - name: ENDPOINT_TO_COMPARE_WITH_2
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: ENDPOINT_TO_COMPARE_WITH_2
+            - name: BLOCK_DIFF_THRESHOLD
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: BLOCK_DIFF_THRESHOLD
+            - name: SLEEP_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: check-block-level-env-vars-configmap-mainnet
+                  key: SLEEP_INTERVAL
+          resources:
+              limits:
+                cpu: 220m
+                memory: 250Mi
+              requests:
+                cpu: 70m
+                memory: 65Mi
+          volumeMounts:
+            - name: scripts-volume
+              mountPath: /scripts
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+      imagePullSecrets:
+        - name: gh-registry
+      volumes:
+        - name: scripts-volume
+          configMap:
+            name: check-block-level-scripts-configmap

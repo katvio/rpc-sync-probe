@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: check-block-level-env-vars-configmap-mainnet
+data:
+  ENDPOINT_TO_MONITOR_1: "http://my-private-endpoint-1"
+  ENDPOINT_TO_MONITOR_2: "http://my-private-endpoint-2"
+  ENDPOINT_TO_MONITOR_3: "http://my-private-endpoint-3"
+  ENDPOINT_TO_COMPARE_WITH_1: "https://public-endpoint-1"
+  ENDPOINT_TO_COMPARE_WITH_2: "https://public-endpoint-2"
+  BLOCK_DIFF_THRESHOLD: "3" # Threshold value for acceptable difference of blocks
+  SLEEP_INTERVAL: "300" # interval in seconds btw 2 checks
